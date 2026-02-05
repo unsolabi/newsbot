@@ -1,73 +1,120 @@
-
 import os
-import requests
 import feedparser
-from datetime import time
+import requests
+from bs4 import BeautifulSoup
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import anthropic
 
-# 환경변수
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-# 🔹 한국 경제 RSS
-RSS_URL = "https://www.mk.co.kr/rss/30000001/"
+SYSTEM_PROMPT = """
+당신은 글로벌 뉴스 브리핑 전용 AI 비서입니다.
 
-def get_economy_news():
-    feed = feedparser.parse(RSS_URL)
-    entries = feed.entries[:5]
-    if not entries:
-        return "오늘 경제 뉴스가 없습니다."
+규칙:
+1. 기사 내용 기반으로만 요약하세요.
+2. 추측, 예측, 과장 금지.
+3. 시장, 경제, 산업, 국제정세에 중요한 뉴스만 브리핑하세요.
+4. 중요하지 않은 뉴스는 제외하세요.
+5. 확실하지 않으면 모른다고 답하세요.
+"""
 
-    news_list = [f"📰 {e.title}" for e in entries]
-    return "\n\n".join(news_list)
+# 🌍 글로벌 주요 뉴스 RSS
+RSS_FEEDS = [
+    "https://www.yna.co.kr/rss/economy.xml",       # 연합뉴스 경제
+    "https://feeds.bbci.co.uk/news/world/rss.xml", # BBC World
+    "http://rss.cnn.com/rss/edition_world.rss",    # CNN World
+    "https://www.cnbc.com/id/100003114/device/rss/rss.html"  # CNBC
+]
 
-def ai_reply(text):
+KEYWORDS = [
+    "economy", "market", "stock", "inflation", "interest", "federal",
+    "china", "oil", "war", "trade", "semiconductor", "AI", "chip",
+    "금리", "환율", "물가", "수출", "반도체", "증시"
+]
+
+def is_important(title):
+    title_lower = title.lower()
+    return any(k.lower() in title_lower for k in KEYWORDS)
+
+def get_articles():
+    articles = []
+    for url in RSS_FEEDS:
+        feed = feedparser.parse(url)
+        for entry in feed.entries[:5]:
+            if is_important(entry.title):
+                articles.append({
+                    "title": entry.title,
+                    "link": entry.link
+                })
+    return articles[:6]
+
+def get_article_text(url):
     try:
-        msg = client.messages.create(
+        headers = {"User-Agent": "Mozilla/5.0"}
+        res = requests.get(url, headers=headers, timeout=5)
+        soup = BeautifulSoup(res.text, "html.parser")
+        paragraphs = soup.find_all("p")
+        text = " ".join(p.get_text() for p in paragraphs)
+        return text[:3000]
+    except:
+        return ""
+
+def summarize_briefing(articles_text):
+    try:
+        response = client.messages.create(
             model="claude-3-haiku-20240307",
-            max_tokens=500,
-            messages=[{"role": "user", "content": text}]
+            max_tokens=700,
+            system=SYSTEM_PROMPT,
+            messages=[
+                {"role": "user", "content": f"다음 뉴스들을 종합해 오늘의 핵심 브리핑 작성:\n\n{articles_text}"}
+            ]
         )
-        return msg.content[0].text
-    except Exception as e:
-        return f"AI 오류: {e}"
+        return response.content[0].text
+    except:
+        return "브리핑 생성 중 오류가 발생했습니다."
 
-# 🔹 아침 자동 브리핑
-async def morning_briefing(context: ContextTypes.DEFAULT_TYPE):
-    news = get_economy_news()
-    summary = ai_reply(f"다음 뉴스 핵심만 한국어로 요약:\n{news}")
-    await context.bot.send_message(chat_id=CHAT_ID, text=f"📊 오늘의 경제 브리핑\n\n{summary}")
-
-# 🔹 시작
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("안녕하세요 🇰🇷 경제 비서 봇입니다!\n무엇이든 물어보세요.")
+    await update.message.reply_text(
+        "🌍 글로벌 뉴스 브리핑 AI 비서입니다.\n"
+        "/brief 입력 → 오늘의 핵심 뉴스 브리핑"
+    )
 
-# 🔹 뉴스 요청 키워드 감지
+async def brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("오늘의 핵심 뉴스를 분석 중입니다...")
+
+    articles = get_articles()
+    if not articles:
+        await update.message.reply_text("중요 뉴스가 없습니다.")
+        return
+
+    combined_text = ""
+    for a in articles:
+        content = get_article_text(a["link"])
+        combined_text += f"\n제목: {a['title']}\n내용: {content}\n"
+
+    briefing = summarize_briefing(combined_text)
+    await update.message.reply_text("📊 오늘의 글로벌 핵심 브리핑\n\n" + briefing)
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
+    response = client.messages.create(
+        model="claude-3-haiku-20240307",
+        max_tokens=300,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_text}]
+    )
+    await update.message.reply_text(response.content[0].text)
 
-    if "뉴스" in user_text or "경제" in user_text:
-        news = get_economy_news()
-        summary = ai_reply(f"다음 뉴스 핵심만 요약:\n{news}")
-        await update.message.reply_text(summary)
-    else:
-        answer = ai_reply(user_text)
-        await update.message.reply_text(answer)
-
-# 실행
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("brief", brief))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-app.job_queue.run_daily(morning_briefing, time=time(hour=8, minute=0))
-
-print("AI 경제 비서 봇 실행 중...")
 app.run_polling()
 
 
