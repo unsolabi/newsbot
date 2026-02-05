@@ -1,73 +1,60 @@
-import feedparser
-import requests
-from bs4 import BeautifulSoup
-import anthropic
-from telegram import Bot
-from apscheduler.schedulers.blocking import BlockingScheduler
 import os
+import requests
+from telegram import Bot
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from apscheduler.schedulers.background import BackgroundScheduler
+import pytz
+from datetime import datetime
 
-CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
+# 환경변수
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
+CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
 
-client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 bot = Bot(token=TELEGRAM_TOKEN)
 
+# ---------------- 뉴스 가져오기 ----------------
 def get_news():
-    url = "https://news.google.com/rss/search?q=반도체&hl=ko&gl=KR&ceid=KR:ko"
-    feed = feedparser.parse(url)
-    articles = []
+    url = "https://newsapi.org/v2/top-headlines?country=us&apiKey=demo"
+    try:
+        r = requests.get(url)
+        data = r.json()
+        articles = data.get("articles", [])[:5]
+        news_text = "\n\n".join([f"📰 {a['title']}" for a in articles])
+        return news_text if news_text else "오늘 뉴스가 없습니다."
+    except Exception as e:
+        return f"뉴스 오류: {e}"
 
-    for entry in feed.entries[:5]:
-        try:
-            res = requests.get(entry.link, timeout=5)
-            soup = BeautifulSoup(res.text, "html.parser")
-            text = " ".join(p.get_text() for p in soup.find_all("p"))
+# ---------------- 뉴스 요약 (Claude API 사용 가능) ----------------
+def summarize(text):
+    # 지금은 단순 요약 대신 그대로 전달
+    return text
 
-            articles.append({
-                "title": entry.title,
-                "link": entry.link,
-                "text": text[:2000]
-            })
-        except:
-            continue
-
-    return articles
-
-def summarize_with_claude(article):
-    prompt = f"""
-    너는 산업 및 투자 분석 비서다.
-    아래 뉴스 내용을 읽고 정리해라.
-
-    1. 한 줄 요약
-    2. 산업/기술 시사점
-    3. 투자 시사점
-
-    기사:
-    {article}
-    """
-
-    msg = client.messages.create(
-        model="claude-3-5-sonnet-20241022",
-        max_tokens=500,
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    return msg.content[0].text
-
-def send_to_telegram(text):
-    bot.send_message(chat_id=CHAT_ID, text=text[:4000])
-
+# ---------------- 아침 뉴스 작업 ----------------
 def morning_news_job():
-    news_list = get_news()
+    news = get_news()
+    summary = summarize(news)
+    bot.send_message(chat_id=CHAT_ID, text=f"☀️ 아침 뉴스입니다!\n\n{summary}")
 
-    for article in news_list:
-        summary = summarize_with_claude(article["text"])
-        message = f"📰 {article['title']}\n{article['link']}\n\n{summary}"
-        send_to_telegram(message)
+# ---------------- 텔레그램 명령어 ----------------
+async def start(update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("안녕하세요! 뉴스봇입니다 🤖")
 
-scheduler = BlockingScheduler()
-scheduler.add_job(morning_news_job, 'cron', hour=8, minute=0)
+async def news(update, context: ContextTypes.DEFAULT_TYPE):
+    news = get_news()
+    summary = summarize(news)
+    await update.message.reply_text(summary)
 
-print("뉴스봇 실행 중...")
+# ---------------- 스케줄러 설정 ----------------
+scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Seoul"))
+scheduler.add_job(morning_news_job, "cron", hour=8, minute=0)
 scheduler.start()
+
+# ---------------- 봇 실행 ----------------
+app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("news", news))
+
+print("Bot started...")
+app.run_polling()
