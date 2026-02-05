@@ -1,4 +1,3 @@
-
 import os
 import requests
 from datetime import time
@@ -12,14 +11,20 @@ from telegram.ext import (
 # ---------------- 환경변수 ----------------
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-NEWS_API_KEY = os.getenv("NEWS_API_KEY")  # ⭐ Railway에 반드시 추가
+NEWS_API_KEY = os.getenv("NEWS_API_KEY")  # Railway 변수에 있어야 함
 
 # ---------------- 뉴스 가져오기 ----------------
 def get_news():
     url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={d21c1d0926df4c6e95808b667a2795a7}"
+
     try:
-        r = requests.get(url)
+        r = requests.get(url, timeout=10)
         data = r.json()
+
+        # API 오류 확인
+        if data.get("status") != "ok":
+            return f"뉴스 API 오류: {data}"
+
         articles = data.get("articles", [])[:5]
 
         if not articles:
@@ -29,12 +34,15 @@ def get_news():
         return news_text
 
     except Exception as e:
-        return f"뉴스 오류 발생: {e}"
+        return f"뉴스 요청 실패: {e}"
 
 # ---------------- 아침 뉴스 자동 전송 ----------------
 async def morning_news(context: ContextTypes.DEFAULT_TYPE):
     news = get_news()
-    await context.bot.send_message(chat_id=CHAT_ID, text=f"☀️ 아침 뉴스입니다!\n\n{news}")
+    await context.bot.send_message(
+        chat_id=CHAT_ID,
+        text=f"☀️ 아침 뉴스입니다!\n\n{news}"
+    )
 
 # ---------------- 텔레그램 명령어 ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -50,7 +58,7 @@ app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("news", news))
 
-# 오전 8시(한국시간) 자동 뉴스
+# 매일 오전 8시 자동 뉴스
 app.job_queue.run_daily(
     morning_news,
     time=time(hour=8, minute=0),
@@ -59,8 +67,6 @@ app.job_queue.run_daily(
 
 print("Bot started...")
 app.run_polling()
-
-
 
 
 
