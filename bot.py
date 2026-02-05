@@ -3,38 +3,42 @@ import logging
 import feedparser
 import requests
 from bs4 import BeautifulSoup
-from datetime import time
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
-# ---------------- 기본 설정 ----------------
+# ---------------- 설정 ----------------
 logging.basicConfig(level=logging.INFO)
-
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-# ---------------- 뉴스 RSS ----------------
-RSS_FEEDS = {
-    "kr_economy": "https://www.mk.co.kr/rss/30100041/",
-    "kr_general": "https://rss.donga.com/total.xml",
-    "us_economy": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
-    "world": "http://feeds.bbci.co.uk/news/world/rss.xml",
-}
+# ---------------- RSS 뉴스 소스 ----------------
+RSS_FEEDS = [
+    "https://www.mk.co.kr/rss/30100041/",   # 한국 경제
+    "https://rss.donga.com/total.xml",     # 한국 종합
+    "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",  # 미국 경제
+    "http://feeds.bbci.co.uk/news/world/rss.xml",     # 세계 뉴스
+]
 
-# ---------------- 기사 본문 가져오기 ----------------
+# ---------------- 기사 본문 일부 가져오기 ----------------
 def get_article_text(url):
     try:
         res = requests.get(url, timeout=5)
         soup = BeautifulSoup(res.text, "html.parser")
         paragraphs = soup.find_all("p")
         text = " ".join(p.get_text() for p in paragraphs[:5])
-        return text[:1000]
+        return text[:800]
     except:
         return ""
 
 # ---------------- 뉴스 수집 ----------------
 def fetch_news():
     articles = []
-    for feed_url in RSS_FEEDS.values():
+    for feed_url in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
             for entry in feed.entries[:2]:
@@ -46,15 +50,15 @@ def fetch_news():
             continue
     return articles[:5]
 
-# ---------------- 요약 (거짓말 방지: 기사 내용만) ----------------
-def summarize_article(title, content):
+# ---------------- 뉴스 요약 ----------------
+def summarize(title, content):
     if not content:
         return f"📰 {title}\n(본문 요약 불가)"
     return f"📰 {title}\n요약: {content[:200]}..."
 
-# ---------------- /news 명령 ----------------
+# ---------------- /news ----------------
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("뉴스를 수집하는 중입니다...")
+    await update.message.reply_text("뉴스 수집 중...")
     articles = fetch_news()
 
     if not articles:
@@ -62,43 +66,41 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     for title, link, content in articles:
-        summary = summarize_article(title, content)
+        summary = summarize(title, content)
         await update.message.reply_text(f"{summary}\n🔗 {link}")
 
-# ---------------- 일반 대화 (개인비서 모드) ----------------
+# ---------------- 개인비서 대화 ----------------
 async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
+    text = update.message.text.lower()
 
-    # 날짜/시간 질문
-    if "오늘" in text and "날짜" in text:
+    if "날짜" in text:
         from datetime import datetime
         today = datetime.now().strftime("%Y-%m-%d")
         await update.message.reply_text(f"오늘 날짜는 {today} 입니다.")
         return
 
-    # 주가 같은 실시간 데이터는 정직하게 불가 안내
     if "주가" in text or "환율" in text:
         await update.message.reply_text(
-            "실시간 금융 데이터는 제공할 수 없습니다. 대신 최신 경제 뉴스를 요약해 드릴까요? /news 입력해 주세요."
+            "실시간 금융 데이터는 제공할 수 없습니다. 대신 최신 경제 뉴스 요약은 /news 입력"
         )
         return
 
-    # 기본 응답
-    await update.message.reply_text("무엇을 도와드릴까요? 뉴스는 /news 입력")
+    await update.message.reply_text("도움이 필요하시면 /news 입력해 주세요.")
 
-# ---------------- 시작 메시지 ----------------
+# ---------------- 시작 ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "안녕하세요 📡 뉴스 브리핑 + 개인비서 봇입니다!\n/news 입력하면 최신 뉴스 요약 제공"
+        "안녕하세요 📡 뉴스 브리핑 + 개인비서 봇입니다!\n/news 입력하면 최신 뉴스 제공"
     )
 
-# ---------------- 봇 실행 ----------------
+# ---------------- 실행 ----------------
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("news", news))
-app.add_handler(CommandHandler(None, chat))  # 모든 일반 대화 처리
+
+# ✅ 일반 대화는 MessageHandler로 처리해야 함
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
 
 print("Bot running...")
 app.run_polling()
-
