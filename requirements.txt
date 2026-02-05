@@ -1,6 +1,4 @@
 python-telegram-bot[job-queue]==20.7
-requests
 feedparser
 beautifulsoup4
-anthropic
-
+requests
