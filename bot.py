@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 
 # ================= 환경변수 =================
-TELEGRAM_TOKEN = os.getenv("8565522116:AAHL1YICr3o9qBCxzgDx1eLK49sFd3WtRrA")
+TELEGRAM_TOKEN = os.getenv("8565522116:AAEBRSHfxYs1YwdFHuT8Bd6ocs5QGjKihsg")
 CHAT_ID = os.getenv("8579497868")
 NEWS_API_KEY = os.getenv("d21c1d0926df4c6e95808b667a2795a7")
 
@@ -70,5 +70,6 @@ app.job_queue.run_daily(
 
 print("Bot started...")
 app.run_polling()
+
 
 
