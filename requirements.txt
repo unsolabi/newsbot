@@ -1,8 +1,9 @@
-feedparser
-requests
-beautifulsoup4
-anthropic
-python-telegram-bot==13.15
+python-telegram-bot==20.7
 apscheduler
 pytz
+requests
+feedparser
+beautifulsoup4
+anthropic
+
 
