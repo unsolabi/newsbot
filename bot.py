@@ -8,23 +8,22 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# ================= 환경변수 =================
-TELEGRAM_TOKEN = os.getenv("8565522116:AAEBRSHfxYs1YwdFHuT8Bd6ocs5QGjKihsg")
-CHAT_ID = os.getenv("8579497868")
-NEWS_API_KEY = os.getenv("d21c1d0926df4c6e95808b667a2795a7")
+# ================= 환경변수 불러오기 =================
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 
 # ================= 뉴스 가져오기 =================
 def get_news():
     if not NEWS_API_KEY:
         return "❌ NEWS_API_KEY가 설정되지 않았습니다."
 
-    url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={d21c1d0926df4c6e95808b667a2795a7}"
+    url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}"
 
     try:
         r = requests.get(url, timeout=10)
         data = r.json()
 
-        # API 자체 오류 체크
         if data.get("status") != "ok":
             return f"뉴스 API 오류: {data}"
 
@@ -37,7 +36,7 @@ def get_news():
         return news_text
 
     except Exception as e:
-        return f"뉴스 가져오기 오류: {e}"
+        return f"뉴스 요청 실패: {e}"
 
 # ================= 아침 자동 뉴스 =================
 async def morning_news(context: ContextTypes.DEFAULT_TYPE):
@@ -56,22 +55,27 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(news)
 
 # ================= 봇 실행 =================
-app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+def main():
+    if not TELEGRAM_TOKEN:
+        raise ValueError("TELEGRAM_TOKEN 환경변수가 설정되지 않았습니다.")
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("news", news))
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-# ⏰ 매일 오전 8시 자동 뉴스 (한국시간)
-app.job_queue.run_daily(
-    morning_news,
-    time=time(hour=8, minute=0),
-    name="morning_news"
-)
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("news", news))
 
-print("Bot started...")
-app.run_polling()
+    # 매일 오전 8시 뉴스 자동 발송
+    app.job_queue.run_daily(
+        morning_news,
+        time=time(hour=8, minute=0),
+        name="morning_news"
+    )
 
+    print("Bot started...")
+    app.run_polling()
 
+if __name__ == "__main__":
+    main()
 
 
 
